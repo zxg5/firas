@@ -1,0 +1,6 @@
+{
+  "name": "WAFA | وفاء - منصة بطاقات الولاء الرقمية",
+  "description": "منصة بطاقات الولاء والمكافآت الرقمية للمحلات التجارية والأنشطة في السعودية، تدعم مغاسل السيارات، الشاليهات، المشاغل، الحلاقين والمطاعم.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
