@@ -24,6 +24,15 @@ import {
   UserX,
   Clock,
   Send,
+  KeyRound,
+  Copy,
+  Check,
+  Share2,
+  Lock,
+  UserCheck,
+  Power,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Branch, StaffMember } from '../../types';
 import { PrintableStandModal } from './PrintableStandModal';
@@ -44,10 +53,44 @@ export const MerchantDashboard: React.FC = () => {
     addStaff,
     updateStaff,
     deleteStaff,
+    createCashier,
+    updateCashier,
+    deleteCashier,
+    updateMerchantPlan,
   } = useWafa();
 
   // Active view tab
-  const [activeTab, setActiveTab] = useState<'overview' | 'program' | 'staff' | 'branches' | 'customers' | 'logs'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'program' | 'plans' | 'staff' | 'branches' | 'customers' | 'logs'>('overview');
+  const [planSuccessAlert, setPlanSuccessAlert] = useState<string | null>(null);
+
+  // Mada Card state
+  const [savedMadaCard, setSavedMadaCard] = useState<{
+    cardNumber: string;
+    holderName: string;
+    expiry: string;
+    bankName: string;
+  } | null>(() => {
+    const saved = localStorage.getItem(`wafa_mada_${currentMerchant?.id || 'default'}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return {
+      cardNumber: '5888 4210 9345 8291',
+      holderName: currentMerchant?.businessName || 'المتجر المعتمد',
+      expiry: '09/28',
+      bankName: 'مصرف الراجحي (مدى)',
+    };
+  });
+
+  const [isAddingMada, setIsAddingMada] = useState(false);
+  const [madaNumberInput, setMadaNumberInput] = useState('');
+  const [madaHolderInput, setMadaHolderInput] = useState(currentMerchant?.businessName || '');
+  const [madaExpiryInput, setMadaExpiryInput] = useState('');
+  const [madaCvvInput, setMadaCvvInput] = useState('');
+  const [madaSuccessMsg, setMadaSuccessMsg] = useState<string | null>(null);
+  const [madaErrorMsg, setMadaErrorMsg] = useState<string | null>(null);
 
   // Edit Program form states
   const [targetVisits, setTargetVisits] = useState(currentProgram?.targetVisits || 5);
@@ -62,13 +105,26 @@ export const MerchantDashboard: React.FC = () => {
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [programSavedAlert, setProgramSavedAlert] = useState(false);
 
-  // New staff modal / form
+  // Cashier creation modal / form
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
-  const [staffName, setStaffName] = useState('');
-  const [staffPhone, setStaffPhone] = useState('05');
-  const [staffPin, setStaffPin] = useState('');
-  const [staffRole, setStaffRole] = useState<'cashier' | 'manager'>('cashier');
-  const [staffBranchId, setStaffBranchId] = useState('');
+  const [cashierName, setCashierName] = useState('');
+  const [cashierUsername, setCashierUsername] = useState('');
+  const [cashierPassword, setCashierPassword] = useState('');
+  const [cashierPhone, setCashierPhone] = useState('05');
+  const [cashierBranchId, setCashierBranchId] = useState('');
+  const [cashierPermRegister, setCashierPermRegister] = useState(true);
+  const [cashierPermVisits, setCashierPermVisits] = useState(true);
+  const [cashierPermRedeem, setCashierPermRedeem] = useState(true);
+  const [cashierPermHistory, setCashierPermHistory] = useState(true);
+  const [cashierFormError, setCashierFormError] = useState('');
+  const [cashierFormSuccess, setCashierFormSuccess] = useState('');
+  const [copiedCashierId, setCopiedCashierId] = useState<string | null>(null);
+
+  // Password & Permissions Management Modals
+  const [editingCashierForPassword, setEditingCashierForPassword] = useState<StaffMember | null>(null);
+  const [newCashierPassword, setNewCashierPassword] = useState('');
+  const [editingCashierForPerms, setEditingCashierForPerms] = useState<StaffMember | null>(null);
+  const [showPassValue, setShowPassValue] = useState<Record<string, boolean>>({});
 
   // New branch modal / form
   const [showAddBranchModal, setShowAddBranchModal] = useState(false);
@@ -135,24 +191,179 @@ export const MerchantDashboard: React.FC = () => {
     setTimeout(() => setProgramSavedAlert(false), 3000);
   };
 
-  // Add Staff Submit
-  const handleAddStaffSubmit = (e: React.FormEvent) => {
+  // Add Cashier Submit Handler
+  const handleAddCashierSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!staffName.trim() || !staffPhone.trim() || !staffPin.trim()) return;
+    setCashierFormError('');
+    setCashierFormSuccess('');
 
-    addStaff(currentMerchant.id, {
-      branchId: staffBranchId || currentMerchant.branches[0]?.id || 'main',
-      name: staffName,
-      phone: staffPhone,
-      pin: staffPin,
-      role: staffRole,
-      isActive: true,
+    if (!cashierName.trim() || !cashierUsername.trim() || !cashierPassword.trim()) {
+      setCashierFormError('الاسم واسم المستخدم وكلمة المرور حقول مطلوبة.');
+      return;
+    }
+
+    const cleanUsername = cashierUsername.trim().toLowerCase();
+    if (!/^[a-zA-Z0-9_-]{3,24}$/.test(cleanUsername)) {
+      setCashierFormError('اسم المستخدم يجب أن يتكون من 3 إلى 24 حرفاً إنجليزياً أو رقماً بدون مسافات.');
+      return;
+    }
+
+    if (cashierPassword.length < 4) {
+      setCashierFormError('كلمة المرور يجب أن لا تقل عن 4 خانات.');
+      return;
+    }
+
+    const res = await createCashier(currentMerchant.id, {
+      name: cashierName.trim(),
+      username: cleanUsername,
+      password: cashierPassword.trim(),
+      phone: cashierPhone.trim(),
+      branchId: cashierBranchId || currentMerchant.branches[0]?.id || 'main',
+      permissions: {
+        canRegisterCustomers: cashierPermRegister,
+        canAddVisits: cashierPermVisits,
+        canRedeemRewards: cashierPermRedeem,
+        canViewHistory: cashierPermHistory,
+      },
     });
 
-    setShowAddStaffModal(false);
-    setStaffName('');
-    setStaffPhone('05');
-    setStaffPin('');
+    if (res.success) {
+      setCashierFormSuccess(res.message);
+      setTimeout(() => {
+        setShowAddStaffModal(false);
+        setCashierName('');
+        setCashierUsername('');
+        setCashierPassword('');
+        setCashierPhone('05');
+        setCashierFormSuccess('');
+      }, 700);
+    } else {
+      setCashierFormError(res.message);
+    }
+  };
+
+  // Switch / Activate Plan
+  const handleActivatePlan = (planId: 'basic' | 'plus' | 'pro', planName: string) => {
+    updateMerchantPlan(currentMerchant.id, planId);
+    setPlanSuccessAlert(`تم تفعيل "${planName}" بنجاح لمنشأتكم (${currentMerchant.businessName})!`);
+    setTimeout(() => setPlanSuccessAlert(null), 5000);
+  };
+
+  // Detect Saudi bank for Mada
+  const detectMadaBank = (num: string): string => {
+    const clean = num.replace(/\D/g, '');
+    if (clean.startsWith('5888') || clean.startsWith('4588')) return 'مصرف الراجحي (مدى)';
+    if (clean.startsWith('5358') || clean.startsWith('4176')) return 'البنك الأهلي السعودي SNB (مدى)';
+    if (clean.startsWith('4228') || clean.startsWith('5241')) return 'مصرف الإنماء (مدى)';
+    if (clean.startsWith('4463') || clean.startsWith('5433')) return 'بنك الرياض (مدى)';
+    if (clean.startsWith('4323') || clean.startsWith('5245')) return 'بنك البلاد (مدى)';
+    if (clean.startsWith('4092') || clean.startsWith('5210')) return 'البنك السعودي الأول SAB (مدى)';
+    if (clean.startsWith('4008') || clean.startsWith('5123')) return 'البنك العربي الوطني ANB (مدى)';
+    return 'بطاقة مدى السعودية (Mada Pay)';
+  };
+
+  // Save Mada Card
+  const handleSaveMadaCard = (e: React.FormEvent) => {
+    e.preventDefault();
+    setMadaErrorMsg(null);
+    setMadaSuccessMsg(null);
+
+    const cleanNum = madaNumberInput.replace(/\s+/g, '');
+    if (cleanNum.length < 15 || cleanNum.length > 19) {
+      setMadaErrorMsg('يرجى إدخال رقم بطاقة مدى صحيح مكون من 16 رقماً.');
+      return;
+    }
+    if (!madaHolderInput.trim()) {
+      setMadaErrorMsg('يرجى إدخال اسم حامل البطاقة.');
+      return;
+    }
+    if (!madaExpiryInput.includes('/') || madaExpiryInput.length < 5) {
+      setMadaErrorMsg('يرجى إدخال تاريخ انتهاء صالح بصيغة MM/YY.');
+      return;
+    }
+
+    const detectedBank = detectMadaBank(cleanNum);
+    const formattedCard = `${cleanNum.slice(0, 4)} ${cleanNum.slice(4, 8)} ${cleanNum.slice(8, 12)} ${cleanNum.slice(12, 16)}`;
+
+    const newCard = {
+      cardNumber: formattedCard,
+      holderName: madaHolderInput.trim().toUpperCase(),
+      expiry: madaExpiryInput.trim(),
+      bankName: detectedBank,
+    };
+
+    setSavedMadaCard(newCard);
+    localStorage.setItem(`wafa_mada_${currentMerchant.id}`, JSON.stringify(newCard));
+    setMadaSuccessMsg(`تم حفظ وتفعيل بطاقة مدى بنجاح (${detectedBank})!`);
+    setIsAddingMada(false);
+    setMadaNumberInput('');
+    setMadaCvvInput('');
+    setTimeout(() => setMadaSuccessMsg(null), 6000);
+  };
+
+  // نسخ بيانات الدخول لمشاركتها مع الكاشير
+  const handleCopyCashierCredentials = (c: StaffMember) => {
+    const branch = currentMerchant.branches.find((b) => b.id === c.branchId);
+    const loginUrl = window.location.origin;
+    const text = `بيانات الدخول لنظام كاشير منصة وفاء | WAFA:
+🏪 النشاط: ${currentMerchant.businessName}
+📍 الفرع: ${branch?.name || 'الفرع الرئيسي'}
+👤 اسم الموظف: ${c.name}
+🔑 اسم المستخدم: ${c.username}
+🔒 كلمة المرور: ${c.password || '••••••••'}
+🌐 رابط تسجيل الدخول: ${loginUrl}
+اختر تبويب "الكاشير" وأدخل اسم المستخدم وكلمة المرور.`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedCashierId(c.id);
+    setTimeout(() => setCopiedCashierId(null), 2500);
+  };
+
+  // إرسال بيانات الدخول عبر واتساب مباشرة إلى الموظف
+  const handleShareCashierWhatsApp = (c: StaffMember) => {
+    const branch = currentMerchant.branches.find((b) => b.id === c.branchId);
+    const loginUrl = window.location.origin;
+    const text = encodeURIComponent(
+`مرحباً يا ${c.name}!
+تم إنشاء حساب الكاشير الخاص بك في منصة وفاء لنشاط (${currentMerchant.businessName}):
+
+🏪 الفرع المخصص: ${branch?.name || 'الفرع الرئيسي'}
+👤 اسم المستخدم: ${c.username}
+🔑 كلمة المرور: ${c.password || '••••••••'}
+🌐 رابط الدخول المباشر: ${loginUrl}
+
+اختر تبويب "الكاشير" في صفحة الدخول، وستتمكن من إضافة زيارات العملاء وصرف المكافآت وفق الصلاحيات الممنوحة لك.`
+    );
+    const cleanDigits = c.phone.replace(/\D/g, '');
+    const intlPhone = cleanDigits.startsWith('05') ? '966' + cleanDigits.slice(1) : cleanDigits;
+    window.open(`https://wa.me/${intlPhone}?text=${text}`, '_blank');
+  };
+
+  // تعطيل أو تفعيل حساب الكاشير فوراً
+  const handleToggleCashierStatus = async (c: StaffMember) => {
+    const newStatus = !c.isActive;
+    await updateCashier(c.id, { isActive: newStatus });
+  };
+
+  // حفظ كلمة المرور الجديدة للكاشير
+  const handleChangeCashierPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCashierForPassword || !newCashierPassword.trim()) return;
+    if (newCashierPassword.trim().length < 4) {
+      alert('يجب أن لا تقل كلمة المرور عن 4 خانات.');
+      return;
+    }
+    await updateCashier(editingCashierForPassword.id, { password: newCashierPassword.trim() });
+    setEditingCashierForPassword(null);
+    setNewCashierPassword('');
+  };
+
+  // حفظ الصلاحيات المحدثة للكاشير
+  const handleSaveCashierPermissionsSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCashierForPerms) return;
+    await updateCashier(editingCashierForPerms.id, { permissions: editingCashierForPerms.permissions });
+    setEditingCashierForPerms(null);
   };
 
   // Add Branch Submit
@@ -284,6 +495,19 @@ export const MerchantDashboard: React.FC = () => {
           >
             <Award className="w-4 h-4" />
             <span>دليل العملاء ({totalCardsCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('plans')}
+            className={`py-3 px-5 rounded-2xl flex items-center gap-2 transition-all cursor-pointer shrink-0 ${
+              activeTab === 'plans'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 bg-white border border-slate-200'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>الباقات وبطاقة مدى 💳</span>
           </button>
 
           <button
@@ -667,77 +891,252 @@ export const MerchantDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 3: Staff Management */}
+        {/* Tab 3: Dedicated Cashier Management (حسابات الكاشير ونقاط البيع) */}
         {activeTab === 'staff' && (
           <div className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 space-y-6 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-slate-100">
               <div>
-                <h3 className="text-base font-bold text-slate-900">فريق العمل والكاشير</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  أضف موظفيك وحدد رمز PIN الخاص بكل كاشير لتسجيل الزيارات بحساب منفصل.
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900">إدارة حسابات الكاشير ونقاط البيع</h3>
+                  <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200">
+                    نظام مستقل ومحمي
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+                  أنشئ حسابات الكاشير المخصصة لكل فرع باسم مستخدم وكلمة مرور بدون الحاجة لإيميل شخصي. يمكنك تزويد الموظف ببياناته، والتحكم بصلاحياته أو تعطيل حسابه فوراً في أي وقت.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => setShowAddStaffModal(true)}
-                className="py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                onClick={() => {
+                  setCashierFormError('');
+                  setCashierFormSuccess('');
+                  setShowAddStaffModal(true);
+                }}
+                className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer shadow-sm shadow-blue-600/20"
               >
-                <Plus className="w-4 h-4" />
-                <span>إضافة موظف جديد</span>
+                <KeyRound className="w-4 h-4" />
+                <span>إنشاء حساب كاشير جديد</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {merchantStaff.map((st) => {
-                const branch = currentMerchant.branches.find((b) => b.id === st.branchId);
-                return (
-                  <div
-                    key={st.id}
-                    className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-3 relative group"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-slate-900">{st.name}</h4>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${st.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                            {st.isActive ? 'نشط' : 'معطّل'}
+            {/* Cashiers Grid */}
+            {merchantStaff.length === 0 ? (
+              <div className="py-12 px-4 text-center rounded-2xl bg-slate-50 border border-dashed border-slate-300">
+                <Users className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+                <h4 className="text-sm font-bold text-slate-700">لا يوجد كاشيرات مسجلون حالياً</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  اضغط على زر «إنشاء حساب كاشير جديد» لتعيين أول موظف نقطة بيع لنشاطك.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {merchantStaff.map((st) => {
+                  const branch = currentMerchant.branches.find((b) => b.id === st.branchId);
+                  const isCopied = copiedCashierId === st.id;
+                  const isPasswordShown = Boolean(showPassValue[st.id]);
+
+                  return (
+                    <div
+                      key={st.id}
+                      className={`rounded-2xl border p-5 space-y-4 relative transition-all duration-200 ${
+                        st.isActive
+                          ? 'bg-white border-slate-200 shadow-sm hover:border-blue-300'
+                          : 'bg-slate-50 border-rose-200 opacity-90'
+                      }`}
+                    >
+                      {/* Top Header */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-900">{st.name}</h4>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                st.isActive
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}
+                            >
+                              {st.isActive ? '● نشط' : '● معطّل'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 font-mono mt-0.5" dir="ltr">
+                            {st.phone}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`هل أنت متأكد من حذف حساب الكاشير (${st.name}) نهائياً؟`)) {
+                              deleteCashier(st.id);
+                            }
+                          }}
+                          className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="حذف حساب الكاشير"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Credentials Box */}
+                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-medium">اسم المستخدم:</span>
+                          <span className="font-mono font-bold text-blue-700 dir-ltr bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
+                            @{st.username}
                           </span>
                         </div>
-                        <div className="text-xs text-slate-500 font-mono mt-0.5 font-semibold" dir="ltr">
-                          {st.phone}
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-medium">كلمة المرور:</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-slate-900 dir-ltr">
+                              {isPasswordShown ? (st.password || '••••••••') : '••••••••'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowPassValue((prev) => ({ ...prev, [st.id]: !prev[st.id] }))}
+                              className="text-slate-400 hover:text-slate-700 p-0.5 cursor-pointer"
+                              title={isPasswordShown ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                            >
+                              {isPasswordShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                          <span className="text-slate-500 font-medium">الفرع المخصص:</span>
+                          <strong className="text-slate-800 text-[11px] truncate max-w-[150px]">
+                            {branch?.name || 'الفرع الرئيسي'}
+                          </strong>
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => deleteStaff(st.id)}
-                        className="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition-colors cursor-pointer"
-                        title="حذف الموظف"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="text-xs text-slate-600 space-y-1 pt-2 border-t border-slate-200">
-                      <div>الفرع: <strong className="text-slate-900">{branch?.name || 'الفرع الرئيسي'}</strong></div>
-                      <div>الرتبة: <span className="text-blue-700 font-bold">{st.role === 'manager' ? 'مدير فرع' : 'كاشير'}</span></div>
-                      <div className="font-mono text-slate-500">رمز PIN الدخول: <strong className="text-slate-900 font-mono font-bold">{st.pin}</strong></div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 text-center text-xs">
-                      <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
-                        <span className="text-[10px] text-slate-500 block font-medium">الزيارات المسجلة</span>
-                        <strong className="text-emerald-700 font-mono text-sm">{st.totalVisitsLogged}</strong>
+                      {/* Permissions Badges */}
+                      <div>
+                        <div className="text-[11px] font-bold text-slate-600 mb-1.5 flex items-center justify-between">
+                          <span>الصلاحيات الممنوحة:</span>
+                          <button
+                            type="button"
+                            onClick={() => setEditingCashierForPerms(st)}
+                            className="text-[10px] text-blue-700 hover:underline font-semibold cursor-pointer"
+                          >
+                            تعديل الصلاحيات
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1 text-[10px]">
+                          <span
+                            className={`px-2 py-1 rounded-md text-center font-medium border ${
+                              st.permissions?.canRegisterCustomers
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                            }`}
+                          >
+                            تسجيل العملاء
+                          </span>
+                          <span
+                            className={`px-2 py-1 rounded-md text-center font-medium border ${
+                              st.permissions?.canAddVisits
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                            }`}
+                          >
+                            إضافة الزيارات
+                          </span>
+                          <span
+                            className={`px-2 py-1 rounded-md text-center font-medium border ${
+                              st.permissions?.canRedeemRewards
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                            }`}
+                          >
+                            صرف المكافآت
+                          </span>
+                          <span
+                            className={`px-2 py-1 rounded-md text-center font-medium border ${
+                              st.permissions?.canViewHistory
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
+                            }`}
+                          >
+                            عرض السجل
+                          </span>
+                        </div>
                       </div>
-                      <div className="bg-white p-2 rounded-xl border border-slate-200 shadow-2xs">
-                        <span className="text-[10px] text-slate-500 block font-medium">مكافآت مستبدلة</span>
-                        <strong className="text-amber-700 font-mono text-sm">{st.totalRewardsRedeemed}</strong>
+
+                      {/* Operational KPIs */}
+                      <div className="grid grid-cols-2 gap-2 pt-1 text-center text-xs">
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/80">
+                          <span className="text-[10px] text-slate-500 block font-medium">الزيارات المسجلة</span>
+                          <strong className="text-emerald-700 font-mono text-sm">{st.totalVisitsLogged || 0}</strong>
+                        </div>
+                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/80">
+                          <span className="text-[10px] text-slate-500 block font-medium">مكافآت مستبدلة</span>
+                          <strong className="text-amber-700 font-mono text-sm">{st.totalRewardsRedeemed || 0}</strong>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons Row */}
+                      <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCashierCredentials(st)}
+                            className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                              isCopied
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                            }`}
+                            title="نسخ بيانات الدخول"
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{isCopied ? 'تم النسخ!' : 'نسخ البيانات'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleShareCashierWhatsApp(st)}
+                            className="py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            title="إرسال بيانات الدخول عبر واتساب"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>إرسال واتساب</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCashierForPassword(st);
+                              setNewCashierPassword('');
+                            }}
+                            className="py-1.5 px-2.5 rounded-lg text-xs font-semibold bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Lock className="w-3.5 h-3.5 text-blue-600" />
+                            <span>تغيير كلمة المرور</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCashierStatus(st)}
+                            className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border ${
+                              st.isActive
+                                ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
+                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                            }`}
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            <span>{st.isActive ? 'تعطيل الحساب' : 'تفعيل الحساب'}</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -962,84 +1361,760 @@ export const MerchantDashboard: React.FC = () => {
                 </tbody>
               </table>
             </div>
+        )}
+
+        {/* Tab: Plans & Mada Payment Card */}
+        {activeTab === 'plans' && (
+          <div className="space-y-6">
+            {/* Success Notifications */}
+            {planSuccessAlert && (
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 font-bold text-xs flex items-center justify-between shadow-xs animate-in slide-in-from-top-2">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <span>{planSuccessAlert}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPlanSuccessAlert(null)}
+                  className="text-emerald-700 hover:text-emerald-900 font-bold px-2 py-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {madaSuccessMsg && (
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 font-bold text-xs flex items-center justify-between shadow-xs animate-in slide-in-from-top-2">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <span>{madaSuccessMsg}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMadaSuccessMsg(null)}
+                  className="text-emerald-700 hover:text-emerald-900 font-bold px-2 py-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Current Active Plan Overview */}
+            <div className="rounded-3xl bg-gradient-to-r from-emerald-800 to-teal-900 text-white p-6 sm:p-7 shadow-lg relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-80 h-80 bg-white/5 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-3 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 text-xs font-bold">
+                      الاشتراك الحالي للمنشأة
+                    </span>
+                    <span className="text-xs text-emerald-200 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      نشط ومفعل
+                    </span>
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black">{merchantPlan.name}</h2>
+                  <p className="text-xs text-emerald-100/90 mt-1 max-w-xl leading-relaxed">
+                    باقتكم الحالية تمكنكم من إدارة برنامج الولاء، تسجيل زيارات العملاء، وإصدار المكافآت مع الربط المباشر ببطاقة مدى.
+                  </p>
+                </div>
+
+                <div className="bg-white/10 backdrop-blur-md border border-white/20 p-4 rounded-2xl text-center min-w-44">
+                  <div className="text-[11px] text-emerald-200 font-medium">قيمة الاشتراك</div>
+                  <div className="text-2xl font-black font-mono mt-0.5">{merchantPlan.monthlyPrice} <span className="text-xs font-normal">ر.س/شهرياً</span></div>
+                  <div className="text-[10px] text-emerald-300 mt-1">التجديد القادم عبر بطاقة مدى</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 1: All Platform Plans with Instant Activation */}
+            <div className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 space-y-6 shadow-sm">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-emerald-600" />
+                  <span>ترقية وتفعيل باقات منصة وفاء</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  اختر الباقة المناسبة لحجم أعمالك، ويتم التفعيل فوراً وتطبيق مميزات الباقة على نشاطك وفروعك.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {plans.map((p) => {
+                  const isCurrent = currentMerchant.planId === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`rounded-3xl p-6 flex flex-col justify-between space-y-5 transition-all ${
+                        isCurrent
+                          ? 'bg-emerald-50/70 border-2 border-emerald-600 shadow-md ring-2 ring-emerald-500/20'
+                          : 'bg-slate-50 border border-slate-200 hover:border-slate-300 shadow-2xs'
+                      }`}
+                    >
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`text-xs font-bold px-3 py-1 rounded-full ${
+                              isCurrent
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {p.badge}
+                          </span>
+                          {isCurrent && (
+                            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200">
+                              ✓ باقتك الحالية
+                            </span>
+                          )}
+                        </div>
+
+                        <div>
+                          <h4 className="text-lg font-black text-slate-900">{p.name}</h4>
+                          <div className="flex items-baseline gap-1 mt-2">
+                            <span className="text-3xl font-black text-slate-900 font-mono">{p.monthlyPrice}</span>
+                            <span className="text-xs text-slate-600 font-bold">ريال / شهرياً</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            أو {p.annualPrice} ر.س / سنوياً (شامل الضريبة)
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-slate-200/80 space-y-2 text-xs text-slate-700">
+                          {p.features.map((f, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                              <span className="text-[11px] leading-tight font-medium">{f}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleActivatePlan(p.id, p.name)}
+                        disabled={isCurrent}
+                        className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          isCurrent
+                            ? 'bg-emerald-600 text-white cursor-default opacity-90'
+                            : 'bg-slate-900 hover:bg-emerald-700 text-white shadow-sm hover:shadow'
+                        }`}
+                      >
+                        {isCurrent ? (
+                          <>
+                            <Check className="w-4 h-4" />
+                            <span>مفعلة حالياً لنشاطك</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            <span>تفعيل وترقية لهذه الباقة فوراً</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Section 2: Saudi Mada Payment Card Management */}
+            <div className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 space-y-6 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-emerald-600" />
+                    <span>إدارة بطاقة مدى السعودية (Mada Pay)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    بطاقة مدى المعتمدة لسداد اشتراك الباقات والتجديد التلقائي وتحصيل المستحقات.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAddingMada(!isAddingMada)}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isAddingMada ? 'إلغاء النموذج' : 'إضافة / تحديث بطاقة مدى'}</span>
+                </button>
+              </div>
+
+              {/* Form: Add/Update Mada Card */}
+              {isAddingMada && (
+                <form onSubmit={handleSaveMadaCard} className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 animate-in fade-in">
+                  <div className="flex items-center gap-2 font-bold text-xs text-slate-800">
+                    <CreditCard className="w-4 h-4 text-emerald-700" />
+                    <span>إدخال بيانات بطاقة مدى السعودية:</span>
+                  </div>
+
+                  {madaErrorMsg && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                      {madaErrorMsg}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        رقم بطاقة مدى (16 رقم) *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="5888 4210 9345 8291"
+                        dir="ltr"
+                        value={madaNumberInput}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 16);
+                          const formatted = val.replace(/(.{4})/g, '$1 ').trim();
+                          setMadaNumberInput(formatted);
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        required
+                      />
+                      <span className="text-[10px] text-slate-500 mt-1 block">
+                        يدعم جميع بنوك المملكة (الراجحي، الأهلي، الإنماء، الرياض، البلاد، وغيرها).
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        اسم حامل البطاقة (كما هو مطبوع بالبطاقة) *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="MOHAMMED AL-OTAIBI"
+                        value={madaHolderInput}
+                        onChange={(e) => setMadaHolderInput(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-600 uppercase"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        تاريخ الانتهاء (MM/YY) *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="09/28"
+                        dir="ltr"
+                        maxLength={5}
+                        value={madaExpiryInput}
+                        onChange={(e) => {
+                          let val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                          if (val.length >= 2) val = `${val.slice(0, 2)}/${val.slice(2)}`;
+                          setMadaExpiryInput(val);
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">
+                        رمز الأمان CVV (3 أرقام) *
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="•••"
+                        dir="ltr"
+                        maxLength={3}
+                        value={madaCvvInput}
+                        onChange={(e) => setMadaCvvInput(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="submit"
+                      className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>حفظ وتفعيل بطاقة مدى فوراً</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingMada(false)}
+                      className="py-2.5 px-4 rounded-xl bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Saved Mada Card Preview */}
+              {savedMadaCard ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center pt-2">
+                  {/* Visual Realistic Mada Card */}
+                  <div className="relative w-full max-w-md h-56 rounded-3xl bg-gradient-to-tr from-emerald-950 via-emerald-900 to-teal-950 p-6 text-white shadow-xl border border-emerald-500/30 flex flex-col justify-between overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-400/10 rounded-full blur-2xl pointer-events-none" />
+                    <div className="absolute bottom-0 left-0 w-48 h-48 bg-teal-400/10 rounded-full blur-2xl pointer-events-none" />
+
+                    {/* Top Row: Bank Name + Atheer / Contactless */}
+                    <div className="relative z-10 flex items-center justify-between">
+                      <span className="text-xs font-bold tracking-wider text-emerald-200">
+                        {savedMadaCard.bankName}
+                      </span>
+                      <div className="flex items-center gap-1 text-emerald-300">
+                        <span className="text-[10px] font-bold">أثير</span>
+                        <svg className="w-5 h-5 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M8.5 16.5a5 5 0 0 1 0-7" />
+                          <path d="M12 19a8.5 8.5 0 0 0 0-14" />
+                          <path d="M15.5 21.5a12 12 0 0 0 0-19" />
+                        </svg>
+                      </div>
+                    </div>
+
+                    {/* Middle: EMV Chip + Card Number */}
+                    <div className="relative z-10 my-auto">
+                      <div className="w-11 h-8 rounded-md bg-gradient-to-tr from-amber-400 via-amber-200 to-yellow-500 border border-amber-300/60 shadow-xs mb-3 flex items-center justify-center">
+                        <div className="w-8 h-5 border border-amber-600/40 rounded-xs grid grid-cols-2 gap-0.5 opacity-60">
+                          <div className="border-r border-amber-600/40"></div>
+                          <div></div>
+                        </div>
+                      </div>
+                      <div className="text-lg sm:text-xl font-mono font-bold tracking-widest text-emerald-50" dir="ltr">
+                        {savedMadaCard.cardNumber}
+                      </div>
+                    </div>
+
+                    {/* Bottom Row: Holder, Expiry & Mada Logo */}
+                    <div className="relative z-10 flex items-end justify-between">
+                      <div>
+                        <div className="text-[9px] text-emerald-300/80 uppercase tracking-wider font-semibold">حامل البطاقة</div>
+                        <div className="text-xs font-bold tracking-wide uppercase mt-0.5">{savedMadaCard.holderName}</div>
+                      </div>
+
+                      <div>
+                        <div className="text-[9px] text-emerald-300/80 uppercase tracking-wider font-semibold">ينتهي في</div>
+                        <div className="text-xs font-mono font-bold mt-0.5" dir="ltr">{savedMadaCard.expiry}</div>
+                      </div>
+
+                      {/* Official Mada Brand Logo Badge */}
+                      <div className="bg-white/95 text-slate-900 px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-md border border-white">
+                        <span className="text-sm font-black text-[#006C35]">مدى</span>
+                        <span className="text-[10px] font-black text-[#FFB612] font-mono">mada</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card Status & Actions */}
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-emerald-900">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>بطاقة مدى مفعلة ومعتمدة في الحساب</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-emerald-800">
+                        تم ربط وتوثيق بطاقة مدى بنجاح لحساب منشأتكم، ويتم استخدامها لسداد اشتراك باقة وفاء الشهرية والسنوية والتجديد الآلي دون أي انقطاع في الخدمة.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingMada(true)}
+                        className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                      >
+                        <CreditCard className="w-3.5 h-3.5" />
+                        <span>استبدال بطاقة مدى الحالية</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPlanSuccessAlert('تم خصم وسداد اشتراك الباقة بنجاح عبر بطاقة مدى!');
+                          setTimeout(() => setPlanSuccessAlert(null), 5000);
+                        }}
+                        className="py-2.5 px-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>سداد الاشتراك الآن بمدى (دفع فوري)</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl space-y-3">
+                  <CreditCard className="w-10 h-10 text-slate-400 mx-auto" />
+                  <div className="text-sm font-bold text-slate-800">لم يتم ربط بطاقة مدى حتى الآن</div>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    اربط بطاقة مدى السعودية لتفعيل الدفع التلقائي لاشتراك باقتك وضمان استمرار عمل برنامج الولاء وفروعك.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingMada(true)}
+                    className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة بطاقة مدى الآن</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Add Staff Modal */}
+      {/* 1. Modal: إنشاء حساب كاشير جديد */}
       {showAddStaffModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white border border-slate-200 p-6 shadow-2xl animate-in zoom-in-95">
-            <h3 className="text-base font-bold text-slate-900">إضافة موظف كاشير جديد</h3>
-            <p className="text-xs text-slate-500 mt-1 mb-4">
-              عين اسم الموظف ورقم جواله ورمز PIN السري لتسجيل الدخول.
-            </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-white border border-slate-200 p-6 sm:p-7 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">إنشاء حساب كاشير جديد</h3>
+                  <span className="text-[11px] text-slate-500">حساب مخصص لنقطة البيع بدون بريد إلكتروني</span>
+                </div>
+              </div>
 
-            <form onSubmit={handleAddStaffSubmit} className="space-y-3 text-right">
+              <button
+                type="button"
+                onClick={() => setShowAddStaffModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {cashierFormError && (
+              <div className="mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{cashierFormError}</span>
+              </div>
+            )}
+
+            {cashierFormSuccess && (
+              <div className="mt-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>{cashierFormSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAddCashierSubmit} className="space-y-3.5 mt-4 text-right">
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">اسم الموظف *</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">اسم الموظف / الكاشير *</label>
                 <input
                   type="text"
-                  placeholder="مثال: أحمد الدوسري"
-                  value={staffName}
-                  onChange={(e) => setStaffName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
+                  placeholder="مثال: أحمد الخالدي"
+                  value={cashierName}
+                  onChange={(e) => setCashierName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
                   required
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">رقم الجوال *</label>
-                <input
-                  type="tel"
-                  dir="ltr"
-                  value={staffPhone}
-                  onChange={(e) => setStaffPhone(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">اسم المستخدم للدخول (Username) *</label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    placeholder="مثال: cashier_wash1"
+                    value={cashierUsername}
+                    onChange={(e) => setCashierUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-blue-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">أحرف إنجليزية وأرقام بدون مسافات</span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">كلمة المرور *</label>
+                  <input
+                    type="text"
+                    dir="ltr"
+                    placeholder="Pass@1234"
+                    value={cashierPassword}
+                    onChange={(e) => setCashierPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">لا تقل عن 4 خانات</span>
+                </div>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">رمز PIN السري (4 أرقام) *</label>
-                <input
-                  type="password"
-                  dir="ltr"
-                  maxLength={6}
-                  placeholder="1234"
-                  value={staffPin}
-                  onChange={(e) => setStaffPin(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-center text-sm tracking-widest text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono font-bold"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">رقم جوال الكاشير (للتواصل)</label>
+                  <input
+                    type="tel"
+                    dir="ltr"
+                    value={cashierPhone}
+                    onChange={(e) => setCashierPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">الفرع المخصص *</label>
+                  <select
+                    value={cashierBranchId}
+                    onChange={(e) => setCashierBranchId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-medium"
+                  >
+                    {currentMerchant.branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">الفرع المخصص</label>
-                <select
-                  value={staffBranchId}
-                  onChange={(e) => setStaffBranchId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
-                >
-                  {currentMerchant.branches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
+              {/* Permissions Checklist */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5">
+                <span className="text-xs font-bold text-slate-800 block">
+                  تحديد صلاحيات الكاشير على الخادم وقاعدة البيانات:
+                </span>
+
+                <div className="space-y-2 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={cashierPermRegister}
+                      onChange={(e) => setCashierPermRegister(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>صلاحية تسجيل عملاء جدد وإصدار بطاقات ولاء</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={cashierPermVisits}
+                      onChange={(e) => setCashierPermVisits(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>صلاحية إضافة الزيارات والأختام المؤهلة للعملاء</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={cashierPermRedeem}
+                      onChange={(e) => setCashierPermRedeem(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>صلاحية صرف واستبدال المكافآت المستحقة بالرمز</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={cashierPermHistory}
+                      onChange={(e) => setCashierPermHistory(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>صلاحية الاطلاع على سجل العمليات والزيارات السابقة للفرع</span>
+                  </label>
+                </div>
               </div>
 
-              <div className="flex gap-2 pt-3">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors cursor-pointer shadow-sm"
+                  className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-sm shadow-blue-600/20"
                 >
-                  إضافة الموظف
+                  إنشاء الحساب وتفعيل الكاشير
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAddStaffModal(false)}
-                  className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
+                  className="py-3 px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Modal: تغيير كلمة مرور الكاشير في أي وقت */}
+      {editingCashierForPassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white border border-slate-200 p-6 shadow-2xl animate-in zoom-in-95 text-right">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">تغيير كلمة مرور الكاشير</h3>
+                  <span className="text-[11px] text-slate-500">
+                    للموظف: {editingCashierForPassword.name} (@{editingCashierForPassword.username})
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingCashierForPassword(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleChangeCashierPasswordSubmit} className="space-y-4 mt-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">كلمة المرور الجديدة *</label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  placeholder="أدخل كلمة المرور الجديدة"
+                  value={newCashierPassword}
+                  onChange={(e) => setNewCashierPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                  required
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  سيتم تطبيق كلمة المرور الجديدة فوراً على الخادم، ويمكن للكاشير استخدامها في الحال.
+                </span>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-sm shadow-blue-600/20"
+                >
+                  حفظ وتطبيق كلمة المرور
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingCashierForPassword(null)}
+                  className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Modal: تعديل صلاحيات الكاشير */}
+      {editingCashierForPerms && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white border border-slate-200 p-6 shadow-2xl animate-in zoom-in-95 text-right">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">تعديل صلاحيات الكاشير</h3>
+                  <span className="text-[11px] text-slate-500">
+                    للموظف: {editingCashierForPerms.name} (@{editingCashierForPerms.username})
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingCashierForPerms(null)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCashierPermissionsSubmit} className="space-y-4 mt-4">
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-xs">
+                <label className="flex items-center gap-2.5 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={editingCashierForPerms.permissions?.canRegisterCustomers ?? true}
+                    onChange={(e) =>
+                      setEditingCashierForPerms({
+                        ...editingCashierForPerms,
+                        permissions: {
+                          ...editingCashierForPerms.permissions,
+                          canRegisterCustomers: e.target.checked,
+                        },
+                      })
+                    }
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>صلاحية تسجيل عملاء جدد</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={editingCashierForPerms.permissions?.canAddVisits ?? true}
+                    onChange={(e) =>
+                      setEditingCashierForPerms({
+                        ...editingCashierForPerms,
+                        permissions: {
+                          ...editingCashierForPerms.permissions,
+                          canAddVisits: e.target.checked,
+                        },
+                      })
+                    }
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>صلاحية إضافة الزيارات والأختام</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={editingCashierForPerms.permissions?.canRedeemRewards ?? true}
+                    onChange={(e) =>
+                      setEditingCashierForPerms({
+                        ...editingCashierForPerms,
+                        permissions: {
+                          ...editingCashierForPerms.permissions,
+                          canRedeemRewards: e.target.checked,
+                        },
+                      })
+                    }
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>صلاحية صرف واستبدال المكافآت</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer font-medium text-slate-700 hover:text-slate-900">
+                  <input
+                    type="checkbox"
+                    checked={editingCashierForPerms.permissions?.canViewHistory ?? true}
+                    onChange={(e) =>
+                      setEditingCashierForPerms({
+                        ...editingCashierForPerms,
+                        permissions: {
+                          ...editingCashierForPerms.permissions,
+                          canViewHistory: e.target.checked,
+                        },
+                      })
+                    }
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>صلاحية عرض سجل العمليات</span>
+                </label>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-sm shadow-blue-600/20"
+                >
+                  حفظ الصلاحيات المحدثة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingCashierForPerms(null)}
+                  className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
                 >
                   إلغاء
                 </button>

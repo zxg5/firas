@@ -1,0 +1,40 @@
+{
+  "id": "/",
+  "name": "وفاء | WAFA - منصة بطاقات الولاء الرقمية",
+  "short_name": "وفاء WAFA",
+  "description": "منصة بطاقات الولاء والمكافآت الرقمية للأنشطة التجارية في المملكة العربية السعودية.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#059669",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["business", "productivity", "shopping"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -18,10 +18,17 @@ interface IndustriesSectionProps {
 export const IndustriesSection: React.FC<IndustriesSectionProps> = ({
   onOpenRegisterModal,
 }) => {
-  const { categories } = useWafa();
+  const { categories, submitIndustrySuggestion } = useWafa();
   const [selectedCatId, setSelectedCatId] = useState<string>('car-wash');
   const [showRequestNew, setShowRequestNew] = useState<boolean>(false);
   const [customIndustryName, setCustomIndustryName] = useState<string>('');
+  const [customProposerName, setCustomProposerName] = useState<string>('');
+  const [customPhone, setCustomPhone] = useState<string>('');
+  const [customCity, setCustomCity] = useState<string>('الخرج');
+  const [customUnit, setCustomUnit] = useState<string>('زيارة');
+  const [customReward, setCustomReward] = useState<string>('');
+  const [customNotes, setCustomNotes] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [customIndustrySuccess, setCustomIndustrySuccess] = useState<boolean>(false);
 
   const getIcon = (iconName: string) => {
@@ -46,15 +53,37 @@ export const IndustriesSection: React.FC<IndustriesSectionProps> = ({
   const selectedCat = categories.find((c) => c.id === selectedCatId) || categories[0];
   const SelectedIcon = getIcon(selectedCat.iconName);
 
-  const handleCustomRequest = (e: React.FormEvent) => {
+  const handleCustomRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customIndustryName.trim()) return;
-    setCustomIndustrySuccess(true);
-    setTimeout(() => {
-      setCustomIndustrySuccess(false);
-      setShowRequestNew(false);
-      setCustomIndustryName('');
-    }, 2000);
+
+    setIsSubmitting(true);
+    try {
+      await submitIndustrySuggestion({
+        categoryName: customIndustryName.trim(),
+        proposerName: customProposerName.trim() || undefined,
+        phone: customPhone.trim() || undefined,
+        city: customCity.trim() || 'الخرج',
+        suggestedUnit: customUnit.trim() || 'زيارة',
+        suggestedReward: customReward.trim() || undefined,
+        notes: customNotes.trim() || undefined,
+      });
+
+      setCustomIndustrySuccess(true);
+      setTimeout(() => {
+        setCustomIndustrySuccess(false);
+        setShowRequestNew(false);
+        setCustomIndustryName('');
+        setCustomProposerName('');
+        setCustomPhone('');
+        setCustomReward('');
+        setCustomNotes('');
+      }, 2500);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -153,44 +182,132 @@ export const IndustriesSection: React.FC<IndustriesSectionProps> = ({
 
         {/* Modal: Request New Industry */}
         {showRequestNew && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 p-6 shadow-xl">
-              <h3 className="text-base font-bold text-slate-900">طلب إضافة نشاط تجاري جديد</h3>
-              <p className="text-xs text-slate-500 mt-1 mb-4">
-                يسعدنا تخصيص نموذج وفاء فوراً لنشاطك التجاري.
-              </p>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="w-full max-w-lg rounded-3xl bg-white border border-slate-200 p-6 sm:p-7 shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">هل نشاطك غير مدرج؟ اقترح نشاطك الآن</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    سيصل اقتراحك مباشرة إلى لوحة إدارة المنصة لمراجعته واعتماده فوراً.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRequestNew(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
 
               {customIndustrySuccess ? (
-                <div className="p-4 rounded-xl bg-emerald-50 text-emerald-800 text-xs text-center font-bold">
-                  تم استلام طلبك بنجاح! سيتواصل معك فريق وفاء لإضافة النشاط.
+                <div className="p-6 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-center space-y-2 animate-in fade-in">
+                  <div className="w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center mx-auto text-xl font-bold shadow-sm">
+                    ✓
+                  </div>
+                  <h4 className="text-sm font-bold text-emerald-900">وصل اقتراحك إلى لوحة الإدارة بنجاح!</h4>
+                  <p className="text-xs text-emerald-800 leading-relaxed max-w-sm mx-auto">
+                    تم توثيق اقتراح النشاط ({customIndustryName}) وإرسال إشعار فوري لإدارة منصة وفاء لتجهيز بطاقة الولاء المخصصة.
+                  </p>
                 </div>
               ) : (
-                <form onSubmit={handleCustomRequest} className="space-y-3">
+                <form onSubmit={handleCustomRequest} className="space-y-3.5">
                   <div>
-                    <label className="text-xs text-slate-700 font-medium block mb-1">
-                      اسم النشاط التجاري
+                    <label className="text-xs text-slate-700 font-bold block mb-1">
+                      اسم النشاط التجاري المقترح <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
-                      placeholder="مثال: مغاسل ملابس، أكاديمية، مجمع طبي..."
+                      placeholder="مثال: مغاسل السجاد، مجمع عيادات أسنان، نادي فروسية..."
                       value={customIndustryName}
                       onChange={(e) => setCustomIndustryName(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white font-medium"
                       required
                     />
                   </div>
 
-                  <div className="flex gap-2 pt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-xs text-slate-700 font-bold block mb-1">
+                        اسمك الكريم / اسم المتجر
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="محمد السبيعي"
+                        value={customProposerName}
+                        onChange={(e) => setCustomProposerName(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-slate-700 font-bold block mb-1">
+                        رقم الجوال للتواصل وتفعيل النظام
+                      </label>
+                      <input
+                        type="tel"
+                        placeholder="0534067866"
+                        dir="ltr"
+                        value={customPhone}
+                        onChange={(e) => setCustomPhone(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-xs text-slate-700 font-bold block mb-1">
+                        المدينة
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="الخرج / الرياض..."
+                        value={customCity}
+                        onChange={(e) => setCustomCity(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-slate-700 font-bold block mb-1">
+                        وحدة الاحتساب المقترحة
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="زيارة، حجز، فحص، جلسة..."
+                        value={customUnit}
+                        onChange={(e) => setCustomUnit(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-700 font-bold block mb-1">
+                      مقترح المكافأة أو ملاحظات إضافية (اختياري)
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="مثال: بعد كل 4 زيارات يحصل العميل على خصم 50% أو غسيل مجاني..."
+                      value={customNotes}
+                      onChange={(e) => setCustomNotes(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="flex gap-2.5 pt-2">
                     <button
                       type="submit"
-                      className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                      disabled={isSubmitting || !customIndustryName.trim()}
+                      className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50"
                     >
-                      إرسال الطلب
+                      {isSubmitting ? 'جاري إرسال الاقتراح للوحة الإدارة...' : 'إرسال الاقتراح لإدارة المنصة'}
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowRequestNew(false)}
-                      className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition-colors cursor-pointer"
+                      className="py-3 px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
                     >
                       إلغاء
                     </button>

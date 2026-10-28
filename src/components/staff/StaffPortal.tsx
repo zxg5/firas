@@ -35,6 +35,7 @@ export const StaffPortal: React.FC = () => {
     currentStaff,
     currentMerchant,
     currentProgram,
+    session,
     staff,
     merchants,
     setActiveStaffId,
@@ -85,8 +86,15 @@ export const StaffPortal: React.FC = () => {
 
   // Active branch
   const activeBranch =
-    currentMerchant?.branches.find((b) => b.id === currentStaff?.branchId) ||
-    currentMerchant?.branches[0];
+    currentMerchant?.branches?.find((b) => b.id === currentStaff?.branchId) ||
+    currentMerchant?.branches?.[0] || {
+      id: currentStaff?.branchId || 'main',
+      merchantId: currentMerchant?.id || '',
+      name: 'الفرع الرئيسي',
+      city: currentMerchant?.city || 'الخرج',
+      district: 'الرئيسي',
+      phone: currentMerchant?.phone || '0500000000',
+    };
 
   // Detect merchant sector
   const sector = useMemo(() => {
@@ -172,30 +180,26 @@ export const StaffPortal: React.FC = () => {
       return;
     }
 
-    // Validate sector specific requirement
-    if (sector === 'car-wash' && !inputCarPlate.trim()) {
+    // Sector specific defaults if left empty
+    const resolvedCarPlate = sector === 'car-wash' ? (inputCarPlate.trim() || undefined) : undefined;
+    const resolvedBookingRef = sector === 'chalets' ? (inputBookingRef.trim() || undefined) : undefined;
+    const resolvedServiceType = sector === 'salon' ? (inputServiceType.trim() || 'خدمة عامة') : undefined;
+
+    // Cashier permission check
+    if (currentStaff.permissions?.canAddVisits === false) {
       setFeedback({
-        type: 'warning',
-        title: 'رقم اللوحة مطلوب',
-        message: 'يرجى إدخال رقم لوحة السيارة لتوثيق الغسلة في مغسلة السيارات لمنع التلاعب.',
+        type: 'error',
+        title: 'صلاحية غير مسموحة',
+        message: 'ليس لديك صلاحية إضافة زيارات للعملاء. يرجى مراجعة التاجر لمنحك الصلاحية.',
       });
       return;
     }
 
-    if (sector === 'chalets' && !inputBookingRef.trim()) {
+    if (!selectedCustomer && currentStaff.permissions?.canRegisterCustomers === false) {
       setFeedback({
-        type: 'warning',
-        title: 'رقم الحجز مطلوب',
-        message: 'يرجى إدخال رقم الحجز الخاص بالشاليه أو الاستراحة لربط الزيارة بحجز فعلي.',
-      });
-      return;
-    }
-
-    if (sector === 'salon' && !inputServiceType.trim()) {
-      setFeedback({
-        type: 'warning',
-        title: 'نوع الخدمة مطلوب',
-        message: 'يرجى اختيار أو كتابة نوع الخدمة المقدمة للعميل في الصالون/المشغل.',
+        type: 'error',
+        title: 'صلاحية غير مسموحة',
+        message: 'ليس لديك صلاحية تسجيل عملاء جدد في النظام. يرجى مراجعة التاجر لمنحك الصلاحية.',
       });
       return;
     }
@@ -210,9 +214,9 @@ export const StaffPortal: React.FC = () => {
         branchId: activeBranch?.id || 'main',
         customerPhone: cleanPhone,
         customerName: inputName.trim() || undefined,
-        carPlate: sector === 'car-wash' ? inputCarPlate.trim() : undefined,
-        bookingRef: sector === 'chalets' ? inputBookingRef.trim() : undefined,
-        serviceType: sector === 'salon' ? inputServiceType.trim() : undefined,
+        carPlate: resolvedCarPlate,
+        bookingRef: resolvedBookingRef,
+        serviceType: resolvedServiceType,
         invoiceRef: sector === 'cafe-restaurant' || sector === 'general' ? inputInvoiceRef.trim() : undefined,
         cooldownMinutes: currentProgram?.antiCheatCooldownMinutes || 30,
         bypassCooldown,
@@ -225,9 +229,9 @@ export const StaffPortal: React.FC = () => {
       branchId: activeBranch?.id || 'main',
       customerPhone: cleanPhone,
       customerName: inputName.trim() || undefined,
-      carPlate: sector === 'car-wash' ? inputCarPlate.trim() : undefined,
-      bookingRef: sector === 'chalets' ? inputBookingRef.trim() : undefined,
-      serviceType: sector === 'salon' ? inputServiceType.trim() : undefined,
+      carPlate: resolvedCarPlate,
+      bookingRef: resolvedBookingRef,
+      serviceType: resolvedServiceType,
       invoiceRef: sector === 'cafe-restaurant' || sector === 'general' ? inputInvoiceRef.trim() : undefined,
       notes: inputNotes.trim() || undefined,
       bypassCooldown,
@@ -312,9 +316,31 @@ export const StaffPortal: React.FC = () => {
 
   // Process Reward Redemption
   const handleRedeemReward = (rewardId: string, expectedCode: string) => {
-    if (!currentStaff || !selectedCustomerCard) return;
+    if (!currentStaff || !selectedCustomerCard || !currentMerchant) return;
+
+    // Check cashier permission
+    if (currentStaff.permissions?.canRedeemRewards === false) {
+      setFeedback({
+        type: 'error',
+        title: 'صلاحية غير مسموحة',
+        message: 'ليس لديك صلاحية استبدال وصرف المكافآت. يرجى مراجعة التاجر لمنحك الصلاحية.',
+      });
+      return;
+    }
 
     const codeToUse = redeemInputCode.trim() || expectedCode;
+
+    // Sync with server
+    fetch('/api/staff/redeem-reward', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffId: currentStaff.id,
+        rewardId,
+        redeemCode: codeToUse,
+        merchantId: currentMerchant.id,
+      }),
+    }).catch((e) => console.log('Server redeem sync:', e));
 
     const res = redeemReward({
       cardId: selectedCustomerCard.id,
@@ -349,11 +375,42 @@ export const StaffPortal: React.FC = () => {
   if (!currentStaff || !currentMerchant || !currentProgram) {
     return (
       <div className="max-w-md mx-auto py-24 px-4 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-200">
+        <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-4 border border-emerald-200 shadow-sm">
           <KeyRound className="w-8 h-8" />
         </div>
         <h3 className="text-base font-bold text-slate-800">بوابة كاشير المحل - منصة وفاء</h3>
         <p className="text-xs text-slate-500 mt-2">يرجى تسجيل الدخول بحساب موظف معتمد لنقطة البيع.</p>
+        <button
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('wafa-open-login', { detail: { tab: 'staff' } }));
+          }}
+          className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-colors cursor-pointer"
+        >
+          <KeyRound className="w-4 h-4" />
+          <span>تسجيل دخول الكاشير</span>
+        </button>
+      </div>
+    );
+  }
+
+  // If cashier account is disabled by merchant
+  if (currentStaff.isActive === false) {
+    return (
+      <div className="max-w-md mx-auto py-24 px-4 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4 border border-rose-200 shadow-sm">
+          <AlertTriangle className="w-8 h-8" />
+        </div>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-100 text-rose-800 text-xs font-black mb-3">
+          حساب الكاشير معطل حالياً
+        </div>
+        <h3 className="text-lg font-black text-slate-800">تم إيقاف صلاحيات الدخول لنقطة البيع</h3>
+        <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+          تم تعطيل حسابك ({currentStaff.name} - @{currentStaff.username || 'cashier'}) من قِبل إدارة متجر ({currentMerchant.businessName}).
+        </p>
+        <div className="mt-4 p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-600">
+          يرجى التواصل مع التاجر المسؤول لإعادة تفعيل الحساب من لوحة تحكم التاجر.
+        </div>
       </div>
     );
   }
@@ -367,53 +424,66 @@ export const StaffPortal: React.FC = () => {
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 pb-28 pt-4">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 space-y-5">
         
-        {/* Quick Demo Sector Switcher for instant testing */}
-        <div className="rounded-2xl bg-white border border-slate-200 p-2.5 px-3.5 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[11px]">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>تجربة شاشة الكاشير في الأنشطة المختلفة:</span>
+        {/* Security & Multi-Tenant Isolation Banner or Preview Selector */}
+        {session?.role === 'staff' ? (
+          <div className="rounded-2xl bg-emerald-50/90 border border-emerald-200 p-3 px-4 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-950">
+            <div className="flex items-center gap-2 font-bold text-xs">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>نقطة بيع معتمدة ومحمية لنشاط: <strong>{currentMerchant.businessName}</strong></span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-emerald-800 font-semibold">
+              <span>الفرع: <strong>{activeBranch?.name || 'الفرع الرئيسي'}</strong></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            </div>
           </div>
+        ) : (
+          <div className="rounded-2xl bg-white border border-slate-200 p-2.5 px-3.5 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[11px]">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>تجربة شاشة الكاشير في الأنشطة المختلفة (معاينة):</span>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-1">
-            {staff.map((st) => {
-              const m = merchants.find((item) => item.id === st.merchantId);
-              const isCurrent = st.id === currentStaff.id;
-              let icon = Car;
-              if (m?.categoryId.includes('chalet')) icon = Home;
-              if (m?.categoryId.includes('barber') || m?.categoryId.includes('salon')) icon = Scissors;
-              if (m?.categoryId.includes('cafe')) icon = Coffee;
-              const IconComp = icon;
+            <div className="flex flex-wrap items-center gap-1">
+              {staff.map((st) => {
+                const m = merchants.find((item) => item.id === st.merchantId);
+                const isCurrent = st.id === currentStaff.id;
+                let icon = Car;
+                if (m?.categoryId.includes('chalet')) icon = Home;
+                if (m?.categoryId.includes('barber') || m?.categoryId.includes('salon')) icon = Scissors;
+                if (m?.categoryId.includes('cafe')) icon = Coffee;
+                const IconComp = icon;
 
-              return (
-                <button
-                  key={st.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveStaffId(st.id);
-                    if (m) setActiveMerchantId(m.id);
-                    setFeedback(null);
-                    setSelectedCustomer(null);
-                    setSelectedCustomerCard(null);
-                    setInputPhone('');
-                    setInputName('');
-                    setInputCarPlate('');
-                    setInputBookingRef('');
-                    setInputServiceType('');
-                    setInputInvoiceRef('');
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                    isCurrent
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                  }`}
-                >
-                  <IconComp className="w-3 h-3" />
-                  <span>{m?.businessName.split(' ')[0]} ({st.name.split(' ')[0]})</span>
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveStaffId(st.id);
+                      if (m) setActiveMerchantId(m.id);
+                      setFeedback(null);
+                      setSelectedCustomer(null);
+                      setSelectedCustomerCard(null);
+                      setInputPhone('');
+                      setInputName('');
+                      setInputCarPlate('');
+                      setInputBookingRef('');
+                      setInputServiceType('');
+                      setInputInvoiceRef('');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                      isCurrent
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <IconComp className="w-3 h-3" />
+                    <span>{m?.businessName.split(' ')[0]} ({st.name.split(' ')[0]})</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Top Cashier Header & Permissions Notice */}
         <div className="rounded-3xl bg-white border border-slate-200 p-5 sm:p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
@@ -424,15 +494,36 @@ export const StaffPortal: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-base font-black text-slate-900">{currentStaff.name}</span>
+                <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md" dir="ltr">
+                  @{currentStaff.username || 'cashier'}
+                </span>
                 <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
-                  {currentStaff.role === 'manager' ? 'مدير الفرع' : 'صلاحية: تسجيل الزيارات والعملاء'}
+                  {currentStaff.role === 'manager' ? 'مدير الفرع' : 'كاشير معتمد'}
                 </span>
               </div>
-              <div className="text-xs text-slate-500 flex items-center gap-2 mt-1">
-                <Building className="w-3.5 h-3.5 text-slate-400" />
-                <span className="font-semibold text-slate-700">{currentMerchant.businessName}</span>
+              <div className="text-xs text-slate-500 flex flex-wrap items-center gap-2 mt-1">
+                <div className="flex items-center gap-1.5 font-semibold text-slate-700">
+                  <Building className="w-3.5 h-3.5 text-slate-400" />
+                  <span>{currentMerchant.businessName}</span>
+                </div>
                 <span>•</span>
                 <span className="text-slate-600 font-medium">{activeBranch?.name}</span>
+              </div>
+              {/* Permissions summary pills */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2 text-[10px] font-bold">
+                <span className="text-slate-500 font-semibold">الصلاحيات:</span>
+                <span className={`px-2 py-0.5 rounded-md ${currentStaff.permissions?.canAddVisits !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-400 line-through'}`}>
+                  إضافة زيارات
+                </span>
+                <span className={`px-2 py-0.5 rounded-md ${currentStaff.permissions?.canRegisterCustomers !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-400 line-through'}`}>
+                  تسجيل عملاء
+                </span>
+                <span className={`px-2 py-0.5 rounded-md ${currentStaff.permissions?.canRedeemRewards !== false ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-400 line-through'}`}>
+                  صرف مكافآت
+                </span>
+                <span className={`px-2 py-0.5 rounded-md ${currentStaff.permissions?.canViewHistory !== false ? 'bg-sky-50 text-sky-700 border border-sky-200' : 'bg-slate-100 text-slate-400 line-through'}`}>
+                  عرض السجل
+                </span>
               </div>
             </div>
           </div>
@@ -809,17 +900,27 @@ export const StaffPortal: React.FC = () => {
               </div>
 
               {/* Submit Button */}
-              <button
-                type="submit"
-                className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.005]"
-              >
-                <Plus className="w-5 h-5" />
-                <span>
-                  {selectedCustomer
-                    ? `تسجيل الزيارة للعميل (${selectedCustomer.name}) +1 ${currentProgram.unitName}`
-                    : `تسجيل العميل وإصدار بطاقة ولاء فوراً (+1 ${currentProgram.unitName})`}
-                </span>
-              </button>
+              {currentStaff.permissions?.canAddVisits === false ? (
+                <div className="p-3.5 rounded-2xl bg-slate-100 text-slate-500 text-xs font-bold text-center border border-slate-200">
+                  ⚠️ حساب الكاشير الحالي ليس لديه صلاحية تسجيل زيارات.
+                </div>
+              ) : !selectedCustomer && currentStaff.permissions?.canRegisterCustomers === false ? (
+                <div className="p-3.5 rounded-2xl bg-slate-100 text-slate-500 text-xs font-bold text-center border border-slate-200">
+                  ⚠️ حساب الكاشير الحالي ليس لديه صلاحية تسجيل عملاء جدد.
+                </div>
+              ) : (
+                <button
+                  type="submit"
+                  className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.005]"
+                >
+                  <Plus className="w-5 h-5" />
+                  <span>
+                    {selectedCustomer
+                      ? `تسجيل الزيارة للعميل (${selectedCustomer.name}) +1 ${currentProgram.unitName}`
+                      : `تسجيل العميل وإصدار بطاقة ولاء فوراً (+1 ${currentProgram.unitName})`}
+                  </span>
+                </button>
+              )}
             </form>
 
             {/* If a customer is active, show their visual stamp card right away */}
@@ -1013,14 +1114,20 @@ export const StaffPortal: React.FC = () => {
                         className="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono uppercase focus:outline-none focus:border-amber-500 w-32 text-center font-bold"
                       />
 
-                      <button
-                        type="button"
-                        onClick={() => handleRedeemReward(reward.id, reward.redeemCode)}
-                        className="py-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>اعتماد وصرف المكافأة</span>
-                      </button>
+                      {currentStaff.permissions?.canRedeemRewards === false ? (
+                        <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-3 py-2 rounded-xl">
+                          صلاحية صرف المكافآت مقيدة
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRedeemReward(reward.id, reward.redeemCode)}
+                          className="py-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>اعتماد وصرف المكافأة</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1036,11 +1143,15 @@ export const StaffPortal: React.FC = () => {
               <span>سجل العمليات المسجلة في ورديتك اليوم ({currentMerchant.businessName})</span>
             </span>
             <span className="text-slate-500 text-[11px] font-mono font-medium">
-              {shiftTxs.length} عملية مسجلة
+              {currentStaff.permissions?.canViewHistory === false ? 'غير مصرح' : `${shiftTxs.length} عملية مسجلة`}
             </span>
           </div>
 
-          {shiftTxs.length === 0 ? (
+          {currentStaff.permissions?.canViewHistory === false ? (
+            <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-2xl border border-slate-200">
+              🔒 تم حجب سجل العمليات بناءً على صلاحيات حساب الكاشير المحددة من التاجر.
+            </div>
+          ) : shiftTxs.length === 0 ? (
             <div className="text-center py-6 text-xs text-slate-400">
               لم تسجل أي عمليات في هذه الوردية بعد. ابدأ بتسجيل أول عميل أو زيارة بالأعلى!
             </div>

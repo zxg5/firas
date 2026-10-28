@@ -33,18 +33,30 @@ export interface Branch {
   phone: string;
 }
 
+export interface CashierPermissions {
+  canRegisterCustomers: boolean; // تسجيل عملاء جدد
+  canAddVisits: boolean;          // إضافة زيارات وأختام
+  canRedeemRewards: boolean;      // استبدال وصرف المكافآت
+  canViewHistory: boolean;        // الاطلاع على سجل العمليات
+}
+
 export interface StaffMember {
   id: string;
   merchantId: string;
   branchId: string;
   name: string;
+  username: string; // اسم المستخدم الحصري لتسجيل الدخول
   phone: string;
+  email?: string;
+  password?: string; // كلمة المرور الخاصة بالكاشير
   pin: string;
   role: 'cashier' | 'manager';
+  permissions: CashierPermissions;
   isActive: boolean;
   totalVisitsLogged: number;
   totalRewardsRedeemed: number;
   createdAt: string;
+  createdBy?: string;
 }
 
 export interface LoyaltyProgram {
@@ -67,14 +79,16 @@ export interface LoyaltyProgram {
 export interface Merchant {
   id: string;
   businessName: string;
-  commercialReg: string;
+  username?: string; // اسم المستخدم الحصري لتسجيل الدخول السريع
+  commercialReg?: string; // رقم السجل التجاري أو وثيقة العمل الحر (يُضاف عند موافقة الإدارة)
   categoryId: string;
   city: string;
   phone: string;
   email: string;
+  password?: string;
   logoUrl?: string;
   planId: 'basic' | 'plus' | 'pro';
-  status: 'active' | 'suspended' | 'trial';
+  status: 'active' | 'suspended' | 'trial' | 'pending_approval'; // بانتظار موافقة الإدارة
   createdAt: string;
   branches: Branch[];
 }
@@ -96,10 +110,22 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
-  email?: string;
+  email: string;
+  password?: string;
   customerCode: string; // e.g. CUST-5821
   carPlate?: string; // Optional car plate for car-wash customers
   createdAt: string;
+}
+
+export interface AuthSession {
+  token: string;
+  role: UserRole;
+  email: string;
+  name: string;
+  id: string;
+  merchantId?: string;
+  staffId?: string;
+  branchId?: string;
 }
 
 export interface CustomerCard {
@@ -147,3 +173,42 @@ export interface PlatformAuditLog {
   details: string;
   timestamp: string;
 }
+
+export interface IndustrySuggestion {
+  id: string;
+  categoryName: string;
+  proposerName?: string;
+  phone?: string;
+  email?: string;
+  city?: string;
+  suggestedUnit?: string;
+  suggestedReward?: string;
+  notes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+}
+
+export interface AdminPermissionSet {
+  canManageMerchants: boolean; // تفعيل وإيقاف وحذف وتعديل التجار
+  canManagePlans: boolean; // تعديل أسعار ومميزات الباقات
+  canManageCategories: boolean; // إضافة وتعديل الأنشطة والقطاعات
+  canManageSuggestions: boolean; // اعتماد طلبات الأنشطة غير المدرجة
+  canManageStaff: boolean; // إضافة وإدارة موظفي الإدارة الآخرين
+  canViewAudit: boolean; // الاطلاع على سجل الرقابة والأمان
+  canManageSettings: boolean; // تعديل أرقام الدعم وإعدادات المنصة
+}
+
+export interface AdminTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  password?: string;
+  roleTitle: string; // مثال: المالك والمدير العام، مشرف عمليات، موظف دعم فني، مدقق أمني
+  permissions: AdminPermissionSet;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+  lastLoginAt?: string;
+}
+

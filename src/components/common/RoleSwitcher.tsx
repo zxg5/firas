@@ -7,6 +7,7 @@ export const RoleSwitcher: React.FC = () => {
   const {
     activeRole,
     setRole,
+    session,
     merchants,
     activeMerchantId,
     setActiveMerchantId,
@@ -21,6 +22,11 @@ export const RoleSwitcher: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+
+  // إذا كان المستخدم مسجلاً ككاشير، يتم إخفاء مبدل الأدوار تماماً لعزل نقطة البيع وحمايتها
+  if (session?.role === 'staff') {
+    return null;
+  }
 
   const rolesList: { role: UserRole; title: string; subtitle: string; icon: React.ComponentType<{ className?: string }> }[] = [
     {
@@ -78,7 +84,7 @@ export const RoleSwitcher: React.FC = () => {
             </button>
           </div>
           <div className="px-2 py-1 bg-slate-800/60 rounded-lg text-[10px] text-slate-400 mt-1 mb-1 border border-slate-800">
-            مخصص للاختبار والمراجعة السريعة. في الإنتاج، تُطبق سياسات RLS والمصادقة الصارمة برمز SMS عبر الخادم.
+            مخصص للاختبار والمراجعة السريعة. في النظام الحقيقي، الدخول بالإيميل وكلمة المرور مع التحقق وعزل البيانات على الخادم.
           </div>
 
           {/* Roles Selector */}
